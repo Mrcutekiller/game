@@ -2,11 +2,17 @@ import { GoogleGenAI } from "@google/genai";
 import { Move, Player } from '../types';
 
 // Safely initialize the AI client
-const apiKey = process.env.API_KEY || '';
+// Check if process exists to avoid browser crashes in non-polyfilled environments
+const apiKey = (typeof process !== 'undefined' && process.env && process.env.API_KEY) || '';
+
 let ai: GoogleGenAI | null = null;
 
 if (apiKey) {
-  ai = new GoogleGenAI({ apiKey });
+  try {
+    ai = new GoogleGenAI({ apiKey });
+  } catch (e) {
+    console.error("Failed to initialize Gemini AI:", e);
+  }
 }
 
 export const getGameCommentary = async (
@@ -16,7 +22,7 @@ export const getGameCommentary = async (
   mode: 'VS_CPU' | 'VS_FRIEND' | 'ONLINE'
 ): Promise<string> => {
   if (!ai) {
-    return "GG! Play again?";
+    return "";
   }
 
   try {
@@ -44,12 +50,12 @@ export const getGameCommentary = async (
 
     const text = response.text;
     if (!text) {
-        return winner === 'Draw' ? "It's a draw!" : `${winner} takes the round!`;
+        return "";
     }
 
     return text.trim();
   } catch (error) {
     console.error("Gemini API Error:", error);
-    return winner === 'Draw' ? "It's a draw!" : `${winner} takes the round!`;
+    return "";
   }
 };

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, Cpu, RefreshCw, ArrowRight, ShieldCheck, Globe, Wifi, Copy, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Users, Cpu, RefreshCw, ArrowRight, ShieldCheck, Globe, Wifi, Copy, Loader2, AlertCircle, CheckCircle2, Trophy, Sparkles } from 'lucide-react';
 import Peer, { DataConnection } from 'peerjs';
 import { Move, GameMode, GameState, Score, Player, NetworkMessage } from './types';
 import { getGameCommentary } from './services/gemini';
@@ -8,6 +8,31 @@ import { MoveIcon } from './components/MoveIcon';
 import { Input } from './components/Input';
 
 const MOVES = [Move.ROCK, Move.PAPER, Move.SCISSORS];
+
+const AI_PERSONAS = [
+  'Nova', 'Apex', 'Synapse', 'Vortex', 'Echo', 'Nebula', 
+  'Cipher', 'Zenith', 'Gemini Prime', 'Quantum', 'Flux'
+];
+
+// Simple particle system for wins
+const Confetti: React.FC = () => {
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
+      {[...Array(20)].map((_, i) => (
+        <div
+          key={i}
+          className="absolute w-2 h-2 bg-yellow-400 rounded-full animate-float"
+          style={{
+            left: `${Math.random() * 100}%`,
+            top: `${Math.random() * 100}%`,
+            animationDelay: `${Math.random() * 2}s`,
+            opacity: 0.6
+          }}
+        />
+      ))}
+    </div>
+  );
+};
 
 const App: React.FC = () => {
   // --- State ---
@@ -47,6 +72,7 @@ const App: React.FC = () => {
   const initializePeer = () => {
     if (peerRef.current) return;
     
+    // Using default PeerJS cloud server
     const newPeer = new Peer();
     
     newPeer.on('open', (id) => {
@@ -55,13 +81,17 @@ const App: React.FC = () => {
     });
 
     newPeer.on('connection', (conn) => {
-      // Incoming connection (I am Host)
       handleConnection(conn);
     });
 
     newPeer.on('error', (err) => {
       console.error("Peer Error:", err);
-      setError("Connection failed. Please check the Room ID and try again.");
+      // Friendly error mapping
+      if (err.type === 'peer-unavailable') {
+         setError("Room not found. Please check the code.");
+      } else {
+         setError("Connection error. Please try again.");
+      }
       setConnectionStatus('disconnected');
       setIsHost(false);
     });
@@ -69,7 +99,6 @@ const App: React.FC = () => {
     peerRef.current = newPeer;
   };
 
-  // Handle Connection (Both Host and Joiner use this)
   const handleConnection = (conn: DataConnection) => {
     connRef.current = conn;
     setConnectionStatus('connecting');
@@ -77,7 +106,6 @@ const App: React.FC = () => {
     conn.on('open', () => {
       setConnectionStatus('connected');
       setError("");
-      // Send my name to peer immediately upon opening
       conn.send({ type: 'HANDSHAKE', name: playerName });
     });
 
@@ -91,42 +119,33 @@ const App: React.FC = () => {
       setConnectionStatus('disconnected');
       setTimeout(resetGame, 3000);
     });
-    
-    conn.on('error', () => {
-       setError("Connection lost.");
-       setConnectionStatus('disconnected');
-    });
   };
 
-  // Connect to a Room (I am Joiner)
   const joinRoom = () => {
     if (!roomIdInput.trim() || !peerRef.current) return;
     setError("");
+    setConnectionStatus('connecting');
     const conn = peerRef.current.connect(roomIdInput.trim());
     handleConnection(conn);
     setIsHost(false);
   };
 
-  // Create a Room (I am Host)
   const createRoom = () => {
     initializePeer();
     setIsHost(true);
     setError("");
   };
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       peerRef.current?.destroy();
     };
   }, []);
 
-  // Handle Network Messages
   const handleNetworkMessage = (msg: NetworkMessage) => {
     switch (msg.type) {
       case 'HANDSHAKE':
         setOpponentName(msg.name);
-        // Both sides transition to match when they receive the opponent's name
         setGameState(GameState.ONLINE_MATCH);
         break;
       case 'MOVE':
@@ -138,29 +157,24 @@ const App: React.FC = () => {
     }
   };
 
-  // Determine Winner
   const determineWinner = (m1: Move, m2: Move): Player | 'Draw' => {
     if (m1 === m2) return 'Draw';
-    
     const isP1Win = 
       (m1 === Move.ROCK && m2 === Move.SCISSORS) ||
       (m1 === Move.PAPER && m2 === Move.ROCK) ||
       (m1 === Move.SCISSORS && m2 === Move.PAPER);
     
     if (isP1Win) return playerName;
-    
-    return mode === GameMode.VS_CPU ? 'Gemini AI' : opponentName;
+    // Return the dynamic opponent name (whether AI persona or player name)
+    return opponentName;
   };
 
-  // Handle Move Selection
   const handleMove = (move: Move) => {
     if (mode === GameMode.ONLINE) {
-      if (p1Move) return; // Already moved
+      if (p1Move) return; 
       setP1Move(move);
-      // Send move to opponent
       connRef.current?.send({ type: 'MOVE', move });
     } else {
-      // Local Logic
       if (gameState === GameState.P1_TURN) {
         setP1Move(move);
         if (mode === GameMode.VS_CPU) {
@@ -177,37 +191,29 @@ const App: React.FC = () => {
     }
   };
 
-  // Effect: Calculate Result
   useEffect(() => {
     const bothMoved = p1Move && p2Move;
-    
     if (bothMoved && (gameState === GameState.ONLINE_MATCH || gameState === GameState.RESULT || gameState === GameState.P2_TURN)) {
         if (gameState !== GameState.RESULT) setGameState(GameState.RESULT);
-
         const result = determineWinner(p1Move, p2Move);
         setWinner(result);
         
-        // Update score
         if (result === playerName || result === 'Player 1') {
             setScore(s => ({ ...s, p1: s.p1 + 1 }));
         } else if (result !== 'Draw') {
             setScore(s => ({ ...s, p2: s.p2 + 1 }));
         }
 
-        // Commentary
         setIsThinking(true);
         setCommentary("");
-        const p2NameForAi = mode === GameMode.VS_CPU ? 'Gemini' : opponentName;
         getGameCommentary(p1Move, p2Move, result, mode === GameMode.VS_CPU ? 'VS_CPU' : 'VS_FRIEND')
             .then(setCommentary)
             .finally(() => setIsThinking(false));
     }
   }, [p1Move, p2Move, gameState]);
 
-  // Effect: Sync New Round (Online)
   useEffect(() => {
     if (mode === GameMode.ONLINE && isMyReady && isOpponentReady) {
-      // Both players are ready, reset and start
       setP1Move(null);
       setP2Move(null);
       setWinner(null);
@@ -218,7 +224,6 @@ const App: React.FC = () => {
     }
   }, [mode, isMyReady, isOpponentReady]);
 
-  // Actions
   const handleStartSetup = () => {
     if (playerName.trim()) {
       setGameState(GameState.MENU);
@@ -261,146 +266,184 @@ const App: React.FC = () => {
   // --- Renders ---
 
   const renderSetup = () => (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] max-w-md mx-auto px-4 w-full animate-float">
-      <h1 className="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-pink-400 mb-8">
-        RPS Arena
-      </h1>
-      <div className="bg-slate-800 p-8 rounded-2xl border border-slate-700 w-full shadow-2xl">
-        <h2 className="text-xl font-bold mb-4">Enter your name</h2>
+    <div className="flex flex-col items-center justify-center min-h-[70vh] max-w-md mx-auto px-4 w-full animate-in fade-in zoom-in duration-500">
+      <div className="mb-12 relative">
+         <div className="absolute -inset-4 bg-indigo-500/20 blur-3xl rounded-full animate-pulse"></div>
+         <h1 className="relative text-7xl font-black text-transparent bg-clip-text bg-gradient-to-br from-white via-indigo-200 to-indigo-400 tracking-tighter">
+           RPS
+         </h1>
+         <div className="absolute -right-8 -top-4 rotate-12">
+            <span className="px-3 py-1 bg-gradient-to-r from-pink-500 to-rose-500 rounded-full text-xs font-bold text-white shadow-lg shadow-pink-500/30">
+                ARENA
+            </span>
+         </div>
+      </div>
+
+      <div className="glass-panel p-8 rounded-3xl w-full shadow-2xl backdrop-blur-xl border-t border-white/10">
+        <h2 className="text-lg font-medium text-slate-300 mb-6 text-center">Initialize Player Identity</h2>
         <Input 
-          placeholder="e.g. Maverick" 
+          placeholder="Enter Codename" 
           value={playerName} 
           onChange={(e) => setPlayerName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleStartSetup()}
           autoFocus
+          className="text-center text-lg tracking-wide bg-slate-900/50 focus:bg-slate-900 transition-all border-slate-700 focus:border-indigo-500"
         />
         <Button 
-            className="mt-6" 
+            className="mt-6 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 border border-white/10" 
             fullWidth 
             onClick={handleStartSetup}
             disabled={!playerName.trim()}
         >
-          Enter Arena <ArrowRight size={18} className="inline ml-2" />
+          Enter The Arena
         </Button>
       </div>
     </div>
   );
 
   const renderMenu = () => (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-8 animate-in fade-in duration-500">
-      <div className="text-center space-y-2">
-        <h1 className="text-4xl font-bold text-white">Welcome, {playerName}</h1>
-        <p className="text-slate-400">Choose your battleground</p>
+    <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-10 animate-in fade-in slide-in-from-bottom-8 duration-500">
+      <div className="text-center space-y-3">
+        <h1 className="text-4xl font-bold text-white tracking-tight">Welcome, <span className="text-indigo-400">{playerName}</span></h1>
+        <p className="text-slate-400 font-light">Select your combat protocol</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-4xl px-4">
-        {/* VS AI */}
-        <button 
-          onClick={() => { setMode(GameMode.VS_CPU); setGameState(GameState.P1_TURN); setOpponentName("Gemini AI"); }}
-          className="group relative p-6 bg-slate-800 rounded-2xl border-2 border-slate-700 hover:border-indigo-500 transition-all duration-300 hover:shadow-2xl hover:shadow-indigo-500/20"
-        >
-          <Cpu className="w-10 h-10 text-indigo-400 mb-4 mx-auto group-hover:scale-110 transition-transform" />
-          <h3 className="text-xl font-bold text-white mb-2">Vs Gemini AI</h3>
-          <p className="text-sm text-slate-400">Challenge the AI</p>
-        </button>
-
-        {/* VS Friend Local */}
-        <button 
-          onClick={() => { setMode(GameMode.VS_FRIEND); setGameState(GameState.P1_TURN); setOpponentName("Player 2"); }}
-          className="group relative p-6 bg-slate-800 rounded-2xl border-2 border-slate-700 hover:border-pink-500 transition-all duration-300 hover:shadow-2xl hover:shadow-pink-500/20"
-        >
-          <Users className="w-10 h-10 text-pink-400 mb-4 mx-auto group-hover:scale-110 transition-transform" />
-          <h3 className="text-xl font-bold text-white mb-2">Local Friend</h3>
-          <p className="text-sm text-slate-400">Pass & Play</p>
-        </button>
-        
-        {/* Online */}
-        <button 
-          onClick={() => { setMode(GameMode.ONLINE); setGameState(GameState.LOBBY); }}
-          className="group relative p-6 bg-slate-800 rounded-2xl border-2 border-slate-700 hover:border-cyan-500 transition-all duration-300 hover:shadow-2xl hover:shadow-cyan-500/20"
-        >
-          <Globe className="w-10 h-10 text-cyan-400 mb-4 mx-auto group-hover:scale-110 transition-transform" />
-          <h3 className="text-xl font-bold text-white mb-2">Online</h3>
-          <p className="text-sm text-slate-400">Play remotely</p>
-        </button>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl px-4">
+        {[
+          { 
+            id: GameMode.VS_CPU, 
+            label: 'Vs Gemini AI', 
+            desc: 'Advanced Neural Opponent', 
+            icon: Cpu, 
+            color: 'text-indigo-400', 
+            border: 'hover:border-indigo-500', 
+            glow: 'hover:shadow-indigo-500/20' 
+          },
+          { 
+            id: GameMode.VS_FRIEND, 
+            label: 'Local Friend', 
+            desc: 'Hotseat Multiplayer', 
+            icon: Users, 
+            color: 'text-pink-400', 
+            border: 'hover:border-pink-500', 
+            glow: 'hover:shadow-pink-500/20' 
+          },
+          { 
+            id: GameMode.ONLINE, 
+            label: 'Online Duel', 
+            desc: 'Remote Connection', 
+            icon: Globe, 
+            color: 'text-cyan-400', 
+            border: 'hover:border-cyan-500', 
+            glow: 'hover:shadow-cyan-500/20' 
+          }
+        ].map((item) => (
+          <button 
+            key={item.id}
+            onClick={() => {
+              setMode(item.id);
+              if (item.id === GameMode.ONLINE) {
+                setGameState(GameState.LOBBY);
+              } else {
+                setGameState(GameState.P1_TURN);
+                if (item.id === GameMode.VS_CPU) {
+                    // Pick a random creative persona for AI
+                    const persona = AI_PERSONAS[Math.floor(Math.random() * AI_PERSONAS.length)];
+                    setOpponentName(persona);
+                } else {
+                    setOpponentName("Player 2");
+                }
+              }
+            }}
+            className={`glass-panel p-8 rounded-3xl border border-transparent transition-all duration-300 hover:scale-105 hover:-translate-y-1 shadow-xl ${item.border} ${item.glow} group text-left`}
+          >
+            <div className={`p-4 rounded-2xl bg-slate-800/50 w-fit mb-6 group-hover:bg-slate-800 transition-colors`}>
+              <item.icon className={`w-8 h-8 ${item.color}`} />
+            </div>
+            <h3 className="text-2xl font-bold text-white mb-2">{item.label}</h3>
+            <p className="text-sm text-slate-400">{item.desc}</p>
+          </button>
+        ))}
       </div>
     </div>
   );
 
   const renderLobby = () => (
     <div className="flex flex-col items-center justify-center min-h-[50vh] max-w-lg mx-auto w-full px-4 animate-in fade-in">
-        <h2 className="text-3xl font-bold mb-8">Online Lobby</h2>
+        <h2 className="text-3xl font-bold mb-8 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-indigo-400">Online Uplink</h2>
         
         {error && (
-            <div className="mb-6 w-full bg-rose-500/10 border border-rose-500/50 p-4 rounded-xl flex items-center gap-3 text-rose-300">
+            <div className="mb-6 w-full glass-panel border-l-4 border-l-rose-500 p-4 rounded-r-xl flex items-center gap-3 text-rose-300">
                 <AlertCircle size={24} />
                 <span className="font-medium">{error}</span>
             </div>
         )}
 
         {isHost ? (
-            <div className="w-full bg-slate-800 p-8 rounded-2xl border border-slate-700 text-center space-y-6">
-                <Loader2 className="w-12 h-12 text-cyan-400 animate-spin mx-auto" />
+            <div className="glass-panel w-full p-8 rounded-3xl text-center space-y-8">
+                <div className="relative inline-block">
+                    <div className="absolute inset-0 bg-cyan-500/20 blur-xl rounded-full animate-pulse"></div>
+                    <Loader2 className="w-16 h-16 text-cyan-400 animate-spin relative z-10" />
+                </div>
                 <div>
-                    <p className="text-slate-400 mb-2">Share this Room Code with your friend</p>
-                    <div className="flex items-center justify-center gap-2 bg-slate-900 p-4 rounded-xl border border-slate-700 group cursor-pointer hover:border-cyan-500 transition-colors"
+                    <p className="text-slate-400 mb-3 text-sm uppercase tracking-widest font-bold">Room Frequency Code</p>
+                    <button 
+                         className="w-full flex items-center justify-center gap-4 bg-slate-900/80 hover:bg-slate-900 p-5 rounded-2xl border border-slate-700/50 group transition-all hover:border-cyan-500/50 active:scale-95"
                          onClick={() => {
                              navigator.clipboard.writeText(peerId);
-                             alert("Copied to clipboard!");
+                             // Could add toast here
                          }}
                     >
-                        <span className="text-2xl font-mono font-bold text-cyan-300 tracking-wider">{peerId || "Generating..."}</span>
-                        <Copy size={16} className="text-slate-500 group-hover:text-white" />
-                    </div>
+                        <span className="text-3xl font-mono font-bold text-white tracking-widest">{peerId || "..."}</span>
+                        <Copy size={20} className="text-slate-500 group-hover:text-cyan-400 transition-colors" />
+                    </button>
                 </div>
-                <p className="text-sm text-slate-500 animate-pulse">Waiting for opponent to join...</p>
-                <Button variant="secondary" onClick={() => setIsHost(false)}>Cancel</Button>
+                <p className="text-sm text-slate-500 animate-pulse">Scanning for incoming connection...</p>
+                <Button variant="secondary" onClick={() => setIsHost(false)} fullWidth>Abort Sequence</Button>
             </div>
         ) : (
             <div className="w-full space-y-6">
                 <div className="grid grid-cols-2 gap-4">
                     <button 
                         onClick={createRoom}
-                        className="p-6 bg-slate-800 rounded-xl border-2 border-slate-700 hover:border-cyan-500 transition-all text-center group"
+                        className="glass-panel p-6 rounded-2xl hover:bg-slate-800/50 transition-all text-center group border border-transparent hover:border-cyan-500/30"
                     >
-                        <Wifi className="w-8 h-8 text-cyan-400 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-                        <span className="block font-bold">Create Room</span>
+                        <Wifi className="w-8 h-8 text-cyan-400 mx-auto mb-3 group-hover:scale-110 transition-transform" />
+                        <span className="block font-bold">Host</span>
                     </button>
-                    <div className="p-6 bg-slate-800 rounded-xl border-2 border-slate-700 text-center opacity-50 cursor-not-allowed">
-                        <Users className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                        <span className="block font-bold">Join Room</span>
+                    <div className="glass-panel p-6 rounded-2xl opacity-40 cursor-not-allowed text-center border border-transparent">
+                         <Globe className="w-8 h-8 text-slate-400 mx-auto mb-3" />
+                         <span className="block font-bold">Public</span>
                     </div>
                 </div>
                 
-                <div className="relative">
+                <div className="relative py-4">
                     <div className="absolute inset-0 flex items-center">
                         <div className="w-full border-t border-slate-700"></div>
                     </div>
-                    <div className="relative flex justify-center text-sm">
-                        <span className="px-2 bg-slate-900 text-slate-500 uppercase font-bold tracking-wider">or join existing</span>
+                    <div className="relative flex justify-center text-xs">
+                        <span className="px-4 bg-[#0f172a] text-slate-500 uppercase font-bold tracking-widest">or join existing</span>
                     </div>
                 </div>
 
-                <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 space-y-4">
+                <div className="glass-panel p-6 rounded-3xl space-y-4">
                      <Input 
-                        placeholder="Paste Room Code here" 
+                        placeholder="Paste Room Code" 
                         value={roomIdInput}
                         onChange={(e) => setRoomIdInput(e.target.value)}
-                        label="Room Code"
+                        className="text-center font-mono tracking-wider text-lg"
                      />
                      <Button 
                         fullWidth 
                         onClick={joinRoom} 
                         disabled={!roomIdInput || connectionStatus === 'connecting'}
-                        className="bg-cyan-600 hover:bg-cyan-500"
+                        className="bg-cyan-600 hover:bg-cyan-500 shadow-cyan-500/20"
                      >
-                        {connectionStatus === 'connecting' ? (
-                            <><Loader2 className="animate-spin inline mr-2" /> Connecting...</>
-                        ) : 'Join Game'}
+                        {connectionStatus === 'connecting' ? 'Establishing Link...' : 'Connect'}
                      </Button>
                 </div>
                 
-                <Button variant="ghost" fullWidth onClick={() => setGameState(GameState.MENU)}>Back to Menu</Button>
+                <Button variant="ghost" fullWidth onClick={() => setGameState(GameState.MENU)}>Return to Base</Button>
             </div>
         )}
     </div>
@@ -409,50 +452,50 @@ const App: React.FC = () => {
   const renderGameArea = () => {
     const isOnline = mode === GameMode.ONLINE;
     
-    // Waiting for opponent in Online mode after I moved
     if (isOnline && p1Move && !p2Move) {
         return (
-            <div className="flex flex-col items-center justify-center min-h-[40vh] space-y-8 animate-pulse">
-                <div className="p-8 bg-slate-800 rounded-full border border-cyan-500/30">
-                    <Loader2 size={64} className="text-cyan-400 animate-spin" />
+            <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-8 animate-pulse">
+                <div className="p-1 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 p-[2px]">
+                   <div className="p-8 bg-slate-900 rounded-full">
+                      <Loader2 size={48} className="text-white animate-spin" />
+                   </div>
                 </div>
                 <div className="text-center">
-                    <h2 className="text-2xl font-bold mb-2">Waiting for {opponentName}...</h2>
-                    <p className="text-slate-400">You threw <span className="text-white font-bold">{p1Move}</span></p>
+                    <h2 className="text-3xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-slate-200 to-slate-400">Awaiting Response</h2>
+                    <p className="text-slate-500">Opponent: <span className="text-white font-medium">{opponentName}</span></p>
                 </div>
             </div>
         );
     }
     
-    // Standard Game Controls
     return (
-        <div className="flex-1 flex flex-col items-center justify-center space-y-8 animate-in fade-in duration-300 relative">
-            {/* Opponent Ready Indicator */}
+        <div className="flex-1 flex flex-col items-center justify-center space-y-12 animate-in fade-in duration-500 relative">
             {isOnline && !p1Move && p2Move && (
-                 <div className="absolute top-0 right-0 md:right-8 bg-pink-600 text-white px-4 py-2 rounded-full animate-bounce shadow-lg flex items-center gap-2">
-                    <CheckCircle2 size={16} /> {opponentName} is ready!
+                 <div className="absolute top-0 right-0 md:right-4 bg-pink-500/10 border border-pink-500/20 text-pink-200 px-6 py-3 rounded-full animate-bounce shadow-lg flex items-center gap-3 backdrop-blur-md">
+                    <CheckCircle2 size={18} className="text-pink-500" /> 
+                    <span className="font-bold">{opponentName} is ready!</span>
                  </div>
             )}
 
-            <div className="text-center space-y-2">
-              <span className="inline-block px-3 py-1 rounded-full bg-slate-800 text-slate-400 text-sm font-medium border border-slate-700">
+            <div className="text-center space-y-4">
+              <span className="inline-block px-4 py-1.5 rounded-full bg-slate-800/80 text-slate-400 text-xs font-bold tracking-widest border border-slate-700 uppercase">
                 Round {score.p1 + score.p2 + 1}
               </span>
-              <h2 className="text-4xl font-bold text-white">
-                {isOnline ? "Your Turn" : (gameState === GameState.P1_TURN ? `${playerName}'s Turn` : `${opponentName}'s Turn`)}
+              <h2 className="text-5xl md:text-6xl font-black text-white tracking-tight drop-shadow-lg">
+                {isOnline ? "YOUR MOVE" : (gameState === GameState.P1_TURN ? `${playerName.toUpperCase()}` : `${opponentName.toUpperCase()}`)}
               </h2>
-              <p className="text-slate-400">Choose your weapon</p>
             </div>
             
-            <div className="grid grid-cols-3 gap-4 w-full max-w-xl mx-auto mt-8">
+            <div className="grid grid-cols-3 gap-4 md:gap-8 w-full max-w-2xl mx-auto">
               {MOVES.map((m) => (
                 <button
                   key={m}
                   onClick={() => handleMove(m)}
-                  className="group flex flex-col items-center justify-center p-6 bg-slate-800 rounded-xl hover:bg-slate-700 active:bg-indigo-600 transition-all border-b-4 border-slate-900 active:border-b-0 active:translate-y-1"
+                  className="group relative flex flex-col items-center justify-center aspect-square glass-panel rounded-3xl transition-all duration-300 hover:-translate-y-2 hover:bg-slate-800/80 hover:shadow-2xl hover:shadow-indigo-500/20 border-t border-white/5"
                 >
-                  <MoveIcon move={m} size={48} className="text-white mb-2 group-hover:scale-110 transition-transform" />
-                  <span className="font-bold text-slate-300 group-hover:text-white">{m}</span>
+                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                  <MoveIcon move={m} size={56} className="text-slate-300 group-hover:text-white transition-colors relative z-10" />
+                  <span className="mt-4 font-bold text-slate-400 group-hover:text-white tracking-widest text-sm relative z-10">{m}</span>
                 </button>
               ))}
             </div>
@@ -461,125 +504,121 @@ const App: React.FC = () => {
   };
 
   const renderResult = () => (
-    <div className="flex flex-col items-center w-full max-w-4xl mx-auto animate-in fade-in zoom-in duration-300">
+    <div className="flex flex-col items-center w-full max-w-5xl mx-auto animate-in fade-in zoom-in duration-300 relative">
+      {/* Background Elements */}
+      {winner === playerName && <Confetti />}
       
-      {/* Moves Display */}
-      <div className="flex items-center justify-center gap-8 md:gap-16 mb-12 w-full">
-        {/* P1 Move */}
-        <div className={`flex flex-col items-center transform transition-all duration-500 ${winner === playerName || winner === 'Player 1' ? 'scale-110' : 'opacity-75 scale-90'}`}>
-          <div className={`p-8 rounded-full mb-4 ${winner === playerName || winner === 'Player 1' ? 'bg-indigo-500 shadow-xl shadow-indigo-500/50' : 'bg-slate-700'}`}>
-            <MoveIcon move={p1Move!} size={64} className="text-white" animate={true} />
+      <div className="grid grid-cols-1 md:grid-cols-3 items-center gap-8 md:gap-12 w-full mb-12">
+        {/* P1 */}
+        <div className={`flex flex-col items-center order-2 md:order-1 transition-all duration-700 ${winner === playerName || winner === 'Player 1' ? 'scale-110 drop-shadow-[0_0_35px_rgba(79,70,229,0.5)]' : 'opacity-60 grayscale'}`}>
+          <div className="glass-panel p-10 rounded-full mb-6 border-2 border-indigo-500/30 bg-indigo-500/10">
+            <MoveIcon move={p1Move!} size={64} className="text-indigo-400" animate={true} />
           </div>
-          <span className="font-bold text-xl text-indigo-300">{playerName}</span>
+          <span className="font-bold text-2xl text-white tracking-wider">{playerName}</span>
         </div>
 
-        <div className="text-4xl font-black text-slate-600">VS</div>
+        {/* VS Status */}
+        <div className="flex flex-col items-center justify-center order-1 md:order-2 space-y-4">
+           <h2 className="text-6xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-slate-400 tracking-tighter italic">
+              {winner === 'Draw' ? 'DRAW' : (winner === playerName ? 'VICTORY' : 'DEFEAT')}
+           </h2>
+        </div>
 
-        {/* P2/AI Move */}
-        <div className={`flex flex-col items-center transform transition-all duration-500 ${winner !== playerName && winner !== 'Player 1' && winner !== 'Draw' ? 'scale-110' : 'opacity-75 scale-90'}`}>
-          <div className={`p-8 rounded-full mb-4 ${winner !== playerName && winner !== 'Player 1' && winner !== 'Draw' ? 'bg-pink-500 shadow-xl shadow-pink-500/50' : 'bg-slate-700'}`}>
-            <MoveIcon move={p2Move!} size={64} className="text-white" animate={true} />
+        {/* P2 - Checks against opponentName which holds the AI persona or player name */}
+        <div className={`flex flex-col items-center order-3 transition-all duration-700 ${winner === opponentName || winner === 'Player 2' ? 'scale-110 drop-shadow-[0_0_35px_rgba(236,72,153,0.5)]' : 'opacity-60 grayscale'}`}>
+          <div className="glass-panel p-10 rounded-full mb-6 border-2 border-pink-500/30 bg-pink-500/10">
+            <MoveIcon move={p2Move!} size={64} className="text-pink-400" animate={true} />
           </div>
-          <span className="font-bold text-xl text-pink-300">
-            {opponentName}
-          </span>
+          <span className="font-bold text-2xl text-white tracking-wider">{opponentName}</span>
         </div>
       </div>
 
-      {/* Result Text */}
-      <div className="text-center space-y-4 mb-8">
-        <h2 className="text-5xl font-black text-white tracking-tight">
-          {winner === 'Draw' ? 'DRAW!' : `${winner?.toUpperCase()} WINS!`}
-        </h2>
-        
-        {/* AI Commentary Bubble */}
-        <div className="min-h-[80px] flex items-center justify-center">
-          {isThinking ? (
-            <div className="flex items-center space-x-2 text-slate-400">
-              <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-              <span className="text-sm">Gemini is commenting...</span>
+      {/* Commentary */}
+      <div className="w-full max-w-2xl mx-auto mb-12 h-24 flex items-center justify-center">
+         {isThinking ? (
+            <div className="flex items-center gap-3 px-6 py-3 rounded-full glass-panel">
+               <Sparkles size={16} className="text-amber-400 animate-spin" />
+               <span className="text-sm text-slate-400 font-medium">Gemini AI is analyzing the match...</span>
             </div>
-          ) : (
+         ) : (
             commentary && (
-              <div className="bg-gradient-to-r from-slate-800 to-slate-900 border border-slate-700 px-6 py-4 rounded-xl max-w-xl mx-auto shadow-lg relative">
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-900 px-2 text-xs text-slate-500 font-bold uppercase tracking-wider">
-                  Commentary
-                </div>
-                <p className="text-lg text-indigo-200 italic">"{commentary}"</p>
+              <div className="glass-panel px-8 py-6 rounded-2xl border-l-4 border-l-amber-400 relative animate-in slide-in-from-bottom-4">
+                 <p className="text-xl md:text-2xl text-white font-serif italic text-center">"{commentary}"</p>
               </div>
             )
-          )}
-        </div>
+         )}
       </div>
 
-      <div className="flex gap-4 items-center">
+      <div className="flex flex-col md:flex-row gap-4 items-center z-10">
         {mode === GameMode.ONLINE && isMyReady ? (
-            <div className="px-6 py-3 rounded-xl bg-slate-800 border border-slate-700 text-slate-400 flex items-center gap-2 animate-pulse">
-                <Loader2 className="animate-spin" size={18} />
-                Waiting for {opponentName}...
+            <div className="px-8 py-4 rounded-xl glass-panel text-slate-300 flex items-center gap-3 animate-pulse">
+                <Loader2 className="animate-spin text-indigo-400" size={20} />
+                <span className="font-medium tracking-wide">WAITING FOR OPPONENT...</span>
             </div>
         ) : (
-            <Button onClick={nextRound} className="min-w-[160px]">
-              Play Again
+            <Button onClick={nextRound} className="min-w-[200px] bg-white text-slate-900 hover:bg-slate-200 shadow-xl shadow-white/10">
+              {mode === GameMode.ONLINE ? 'Ready Next Round' : 'Play Again'}
             </Button>
         )}
         
-        <Button variant="secondary" onClick={resetGame}>
-          {mode === GameMode.ONLINE ? 'Disconnect' : 'Back to Menu'}
+        <Button variant="ghost" onClick={resetGame} className="text-slate-400 hover:text-white">
+          {mode === GameMode.ONLINE ? 'Disconnect' : 'Exit to Menu'}
         </Button>
       </div>
     </div>
   );
 
   const renderTransition = () => (
-    <div className="flex flex-col items-center justify-center h-full space-y-8 py-12">
-      <div className="p-8 bg-slate-800 rounded-full">
-        <ShieldCheck size={64} className="text-emerald-400" />
+    <div className="flex flex-col items-center justify-center h-full space-y-12 py-12">
+      <div className="p-10 glass-panel rounded-full border border-emerald-500/30 shadow-[0_0_50px_rgba(16,185,129,0.2)]">
+        <ShieldCheck size={80} className="text-emerald-400" />
       </div>
-      <h2 className="text-3xl font-bold text-center">
-        Pass device to {opponentName}
-      </h2>
-      <p className="text-slate-400 max-w-md text-center">
-        {playerName} has made their move. Hand the device over to {opponentName} to continue.
-      </p>
-      <Button onClick={() => setGameState(GameState.P2_TURN)} className="bg-emerald-600 hover:bg-emerald-500">
-        I am {opponentName} - Ready!
+      <div className="text-center space-y-4">
+          <h2 className="text-4xl font-bold text-white">SECURE DEVICE</h2>
+          <p className="text-slate-400 max-w-md mx-auto leading-relaxed">
+            Move registered. Pass terminal to <span className="text-emerald-400 font-bold">{opponentName}</span> for counter-move.
+          </p>
+      </div>
+      <Button onClick={() => setGameState(GameState.P2_TURN)} className="bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/30 px-12 py-4 text-lg">
+        Identify as {opponentName}
       </Button>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col">
-      {/* Header / Scoreboard */}
+    <div className="min-h-screen flex flex-col relative z-10">
       {gameState !== GameState.MENU && gameState !== GameState.SETUP && (
-        <header className="bg-slate-800/50 border-b border-slate-700/50 p-4">
-          <div className="max-w-4xl mx-auto flex justify-between items-center">
+        <header className="p-6">
+          <div className="max-w-6xl mx-auto flex justify-between items-center glass-panel rounded-2xl px-6 py-4">
             <button onClick={resetGame} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
-              <span className="font-bold text-lg tracking-tight">RPS Arena</span>
+              <span className="font-bold text-xl tracking-tighter">RPS<span className="text-indigo-400">ARENA</span></span>
             </button>
             
-            <div className="flex items-center gap-8 bg-slate-900/50 px-6 py-2 rounded-full border border-slate-700">
-              <div className="text-center">
-                <span className="block text-xs text-indigo-400 font-bold uppercase truncate max-w-[80px]">{playerName}</span>
-                <span className="text-2xl font-black text-white">{score.p1}</span>
+            <div className="flex items-center gap-8">
+              <div className="text-right hidden md:block">
+                <span className="block text-xs text-indigo-400 font-bold uppercase tracking-wider mb-1">{playerName}</span>
+                <span className="text-3xl font-black text-white leading-none">{score.p1}</span>
               </div>
-              <div className="h-8 w-px bg-slate-700"></div>
-              <div className="text-center">
-                <span className="block text-xs text-pink-400 font-bold uppercase truncate max-w-[80px]">{opponentName}</span>
-                <span className="text-2xl font-black text-white">{score.p2}</span>
+              <div className="h-10 w-px bg-white/10 mx-2"></div>
+              <div className="text-left hidden md:block">
+                <span className="block text-xs text-pink-400 font-bold uppercase tracking-wider mb-1">{opponentName}</span>
+                <span className="text-3xl font-black text-white leading-none">{score.p2}</span>
+              </div>
+              {/* Mobile Score Compact */}
+              <div className="md:hidden flex items-center gap-3 font-bold text-xl">
+                 <span className="text-indigo-400">{score.p1}</span>
+                 <span className="text-slate-600">-</span>
+                 <span className="text-pink-400">{score.p2}</span>
               </div>
             </div>
             
-            <button onClick={resetGame} className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-full transition-all">
+            <button onClick={resetGame} className="p-3 text-slate-400 hover:text-white hover:bg-white/10 rounded-xl transition-all">
               <RefreshCw size={20} />
             </button>
           </div>
         </header>
       )}
 
-      {/* Main Content Area */}
       <main className="flex-1 flex flex-col p-4 md:p-8 overflow-hidden relative">
         {gameState === GameState.SETUP && renderSetup()}
         {gameState === GameState.MENU && renderMenu()}
@@ -591,9 +630,8 @@ const App: React.FC = () => {
         {gameState === GameState.RESULT && renderResult()}
       </main>
       
-      {/* Footer */}
-      <footer className="p-4 text-center text-slate-600 text-sm">
-        Powered by Google Gemini • Built with React & Tailwind
+      <footer className="p-6 text-center text-slate-500 text-xs font-medium tracking-widest uppercase opacity-60">
+        System Core: Google Gemini  //  Ui: React 19
       </footer>
     </div>
   );
