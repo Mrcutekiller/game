@@ -1,0 +1,5 @@
+{
+  "name": "RPS Arena: Gemini Edition",
+  "description": "A modern Rock-Paper-Scissors game featuring local multiplayer, online play with friends, and an AI opponent powered by Gemini.",
+  "requestFramePermissions": []
+}
